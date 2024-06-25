@@ -1,0 +1,11 @@
+[package]
+name = "stealthwave5/flagservice"
+description = ""
+version = "0.0.1"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "server"
+exclude = ["assets", "docs"]
+include = ["CHANGELOG.md", "FlagService", "default.project.json", "LICENSE"]
+
+[dependencies]

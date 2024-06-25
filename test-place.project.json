@@ -1,0 +1,14 @@
+{
+    "name": "FlagService",
+    "tree": {
+      "$className": "DataModel",
+      "$ignoreUnknownInstances": true,
+      "ReplicatedStorage": {
+        "$className": "ReplicatedStorage",
+  
+        "FlagService": {
+          "$path": "./FlagService"
+        }
+      }
+    }
+  }
