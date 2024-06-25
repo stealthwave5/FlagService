@@ -1,5 +1,5 @@
 [package]
-name = "stealthwave5/FlagService"
+name = "stealthwave5/flagservice"
 description = ""
 version = "0.0.1"
 license = "MIT"
@@ -9,3 +9,5 @@ exclude = ["assets", "docs"]
 include = ["CHANGELOG.md", "FlagService", "default.project.json", "LICENSE"]
 
 [dependencies]
+Promise = "evaera/promise@^4"
+Signal = "lucasmzreal/fastsignal@10.2.1"

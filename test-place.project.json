@@ -1,14 +1,57 @@
 {
     "name": "FlagService",
     "tree": {
-      "$className": "DataModel",
-      "$ignoreUnknownInstances": true,
-      "ReplicatedStorage": {
-        "$className": "ReplicatedStorage",
-  
-        "FlagService": {
-          "$path": "./FlagService"
+        "$className": "DataModel",
+        "$ignoreUnknownInstances": true,
+
+        "ReplicatedStorage": {
+            "$className": "ReplicatedStorage",
+    
+            "Packages": {
+                "$className": "Folder",
+
+                "_Index": {
+                    "$className": "Folder",
+                    "$path": "./Packages/_Index",
+
+                    "FlagService": {
+                        "$path": "./FlagService"
+                    }
+                },
+                
+                "Promise": {
+                    "$path": "./Packages/Promise.lua"
+                },
+                "Signal": {
+                    "$path": "./Packages/Signal.lua"
+                },
+
+                "FlagService": {
+                    "$className": "ModuleScript",
+                    "$properties": {
+                        "Source": "return require(script.Parent._Index['FlagService'])"
+                    }
+                }
+            }
+        },
+
+        "ServerScriptService": {
+            "$className": "ServerScriptService",
+    
+            "server": {
+                "$path": "./Examples/server"
+            }
+        },
+        "StarterPlayer": {
+            "$className": "StarterPlayer",
+    
+            "StarterPlayerScripts": {
+                "$className": "StarterPlayerScripts",
+    
+                "client": {
+                    "$path": "./Examples/client"
+                }
+            }
         }
-      }
     }
   }
