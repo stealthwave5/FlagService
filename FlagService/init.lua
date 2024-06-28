@@ -85,7 +85,7 @@ local hasLoadedFlags = false
 
 local flagsDataStore: DataStore = DataStoreService:GetDataStore(FLAG_SERVICE_DATA_STORE_NAME)
 local flags: { [string]: any } = {}
-local flagSignals: { [string]: Signal<Flag> } = {}
+local flagSignals: { [string]: Signal<any> } = {}
 
 -- Private functions
 function FlagService:_loadFlags()
@@ -111,15 +111,15 @@ function FlagService:_readFlagChangedMessages()
             return
         end
 
-        local flagChangedPrintMessage = `Flag changed!\nFlag changed on server {messagingFlagData.ServerId}\nThis server: {SERVER_ID}\nFlag name: {messagingFlagData.Flag.Name}\nFlag value: {messagingFlagData.Flag.Value}`
-        print(flagChangedPrintMessage)
-    end)
-end
+        local flag = messagingFlagData.Flag
 
-function FlagService:_initialize()
-    isInitialized = true
-    FlagService:_loadFlags()
-    FlagService:_readFlagChangedMessages()
+        FlagService:_updateFlagValue(flag.Name, flag.Value)
+        if flag.MetaData ~= nil then
+            FlagService:_updateFlagMetaData(flag.Name, flag.MetaData)
+        end
+
+        FlagService:_fireInternalFlagChangedSignal(flag.Name)
+    end)
 end
 
 function FlagService:_awaitFlagsLoaded()
@@ -164,7 +164,7 @@ function FlagService:_updateFlagMetaData(flagName: string, flagMetaData: flagMet
     flags[flagName].MetaData = flagMetaData
 end
 
-function FlagService:_sendFlagChangedMessage(Flag: Flag)
+function FlagService:_sendFlagChangedMessageToOtherServers(Flag: Flag)
     local messagingFlagData: messagingFlagData = {
         Flag = Flag,
         ServerId = SERVER_ID,
@@ -173,7 +173,7 @@ function FlagService:_sendFlagChangedMessage(Flag: Flag)
     MessagingService:PublishAsync(FLAG_SERVICE_MESSAGING_TOPIC, messagingFlagData)
 end
 
-function FlagService:_fireFlagChangedSignal(flagName: string)
+function FlagService:_fireInternalFlagChangedSignal(flagName: string)
     if not flagSignals[flagName] then
         return
     end
@@ -181,49 +181,79 @@ function FlagService:_fireFlagChangedSignal(flagName: string)
     flagSignals[flagName]:Fire(flags[flagName].Value)
 end
 
+function FlagService:_initialize()
+    isInitialized = true
+    FlagService:_loadFlags()
+    FlagService:_readFlagChangedMessages()
+end
+
 -- Public functions
+
+--//
+--// Set a flag by name
+--//
+
+function FlagService:SetFlag(flagName: string, newValue: any, metaData: flagMetaData?)
+    if flags[flagName] == nil then
+        FlagService:_createFlag({
+            Name = flagName,
+            Value = newValue,
+            MetaData = metaData,
+        })
+    end
+
+    FlagService:_updateFlagValue(flagName, newValue)
+
+    if metaData ~= nil then
+        FlagService:_updateFlagMetaData(flagName, metaData)
+    end
+
+    local thisFlag: Flag = flags[flagName]
+
+    local success, result = pcall(function()
+        return flagsDataStore:UpdateAsync(FLAG_SERVICE_DATA_STORE_KEY, function(oldData: any?)
+            local newFlags = oldData or {}
+
+            newFlags[flagName] = thisFlag
+
+            return newFlags
+        end)
+    end)
+
+    if not success then
+        warn("Failed to update flag in DataStore", result)
+        return false, result
+    end
+
+    FlagService:_fireInternalFlagChangedSignal(flagName)
+    FlagService:_sendFlagChangedMessageToOtherServers(thisFlag)
+
+    return true, thisFlag
+end
+
 function FlagService:SetFlagAsync(flagName: string, newValue: any, metaData: flagMetaData?): Promise<boolean | string>
     return Promise.new(function(resolve: PromiseResolve, reject: PromiseReject)
         if hasLoadedFlags == false then
             FlagService:_awaitFlagsLoaded()
         end
 
-        if flags[flagName] == nil then
-            FlagService:_createFlag({
-                Name = flagName,
-                Value = newValue,
-                MetaData = metaData,
-            })
-        end
-
-        FlagService:_updateFlagValue(flagName, newValue)
-
-        if metaData ~= nil then
-            FlagService:_updateFlagMetaData(flagName, metaData)
-        end
-
-        local thisFlag: Flag = flags[flagName]
-
-        local success, result = pcall(function()
-            return flagsDataStore:UpdateAsync(FLAG_SERVICE_DATA_STORE_KEY, function(oldData: any?)
-                local newFlags = oldData or {}
-
-                newFlags[flagName] = thisFlag
-
-                return newFlags
-            end)
-        end)
+        local success, result = FlagService:SetFlag(flagName, newValue, metaData)
 
         if not success then
             reject(result)
             return
         end
 
-        FlagService:_fireFlagChangedSignal(flagName)
-        FlagService:_sendFlagChangedMessage(thisFlag)
-
-        resolve(thisFlag)
+        resolve(result)
     end)
+end
+
+--//
+--// Get a flag by name
+--//
+
+function FlagService:GetFlag(flagName: string): Flag?
+    return flags[flagName]
 end
 
 function FlagService:GetFlagAsync(flagName: string): Promise<Flag>
@@ -232,7 +262,7 @@ function FlagService:GetFlagAsync(flagName: string): Promise<Flag>
             FlagService:_awaitFlagsLoaded()
         end
 
-        local flagData = flags[flagName]
+        local flagData = FlagService:GetFlag(flagName)
 
         if flagData == nil then
             reject("Flag does not exist")
@@ -243,17 +273,60 @@ function FlagService:GetFlagAsync(flagName: string): Promise<Flag>
     end)
 end
 
-function FlagService:UpdateFlagAsync(flagName: string, func: (any) -> any, metaData: any): Promise<Flag>
-    --TODO: Implement
+--//
+--// Update a flag by name
+--//
+function FlagService:UpdateFlag(flagName: string, updateFunction: (oldValue: any) -> any, metaData: any)
+    if flags[flagName] == nil then
+        warn("Flag does not exist")
+        return
+    end
+
+    local flag = flags[flagName]
+
+    local newValue = updateFunction(flag.Value)
+
+    local success, result = FlagService:SetFlagAsync(flagName, newValue, metaData):await()
+
+    if not success then
+        return success, result
+    end
+
+    return success, result
 end
 
-function FlagService:GetFlagChangedSignal(flagName: string): Signal<Flag>
+function FlagService:UpdateFlagAsync(flagName: string, updateFunction: (oldValue: any) -> any, metaData: any): Promise<Flag>
+    return Promise.new(function(resolve: PromiseResolve, reject: PromiseReject)
+        if hasLoadedFlags == false then
+            FlagService:_awaitFlagsLoaded()
+        end
+
+        local success, result = FlagService:UpdateFlag(flagName, updateFunction, metaData)
+
+        if not success then
+            reject(result)
+            return
+        end
+
+        resolve(result)
+    end)
+end
+
+--//
+--// Get a flag changed signal
+--//
+
+function FlagService:GetFlagChangedSignal(flagName: string): Signal<any>
     if not flagSignals[flagName] then
         flagSignals[flagName] = Signal.new()
     end
 
     return flagSignals[flagName]
 end
+
+--//
+--// Setup
+--//
 
 if isInitialized == false then
     FlagService:_initialize()
