@@ -383,7 +383,7 @@ function FlagService:GetFlagChangedSignal(flagName: string)
     return getFlagChangedSignal(flagName)
 end
 
-function FlagService:ResetFlagFromStorage(flagName: string)
+function FlagService:UpdateFlag(flagName: string)
     return pullLatestFlagValueFromDataStore(flagName)
 end
 
