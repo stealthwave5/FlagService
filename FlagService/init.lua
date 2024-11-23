@@ -150,6 +150,7 @@ local FLAG_SERVICE_DATA_STORE = DataStoreService:GetDataStore(FLAG_SERVICE_DATA_
 -- Variables
 local isStarted = false
 local cachedFlags: { [string]: CachedFlag } = {}
+local flagChangedSignals: { [string]: any } = {}
 
 -- Private functions
 local function verboseWarn(...)
