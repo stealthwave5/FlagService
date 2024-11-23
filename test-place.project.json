@@ -18,13 +18,6 @@
                         "$path": "./FlagService"
                     }
                 },
-                
-                "Promise": {
-                    "$path": "./Packages/Promise.lua"
-                },
-                "Signal": {
-                    "$path": "./Packages/Signal.lua"
-                },
 
                 "FlagService": {
                     "$className": "ModuleScript",
