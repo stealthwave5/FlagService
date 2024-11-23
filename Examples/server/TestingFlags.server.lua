@@ -3,7 +3,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local FlagService = require(ReplicatedStorage.Packages.FlagService) ---@module FlagService
 
-FlagService:SetFlag("TestFlag", true)
-print(FlagService:GetFlag("TestFlag"))
-FlagService:SetFlagThisServer("TestFlag", false)
-FlagService:SetFlag("TestFlag", true)
+local FLAG_NAME = "TestFlag"
+
+FlagService:GetFlagChangedSignal(FLAG_NAME):Connect(function(newValue)
+    print("Flag changed to", newValue)
+end)
+
+local currentFlagValue = FlagService:GetFlag(FLAG_NAME)
+print("Current flag value is", currentFlagValue)
+FlagService:SetFlag(FLAG_NAME, not currentFlagValue)

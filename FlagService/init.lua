@@ -13,7 +13,7 @@ local MessagingService = game:GetService("MessagingService")
 local RunService = game:GetService("RunService")
 
 -- Modules
-local Signal do
+local Signal: Signal do
 
 	local FreeRunnerThread
 
@@ -69,7 +69,7 @@ local Signal do
 
 	end
 
-	function SignalClass.New()
+	function SignalClass.new()
 
 		local self = {
 			head = nil,
@@ -120,12 +120,18 @@ local Signal do
 	end
 
 	Signal = table.freeze({
-		New = SignalClass.New,
+		new = SignalClass.new,
 	})
 
 end
 
 -- Types
+type Signal = {
+    new: () -> Signal,
+    Connect: (self: Signal, listener: (...any) -> ()) -> RBXScriptConnection,
+    GetListenerCount: () -> number,
+    Fire: (self: Signal, ...any) -> (),
+}
 
 type CachedFlag = {
     FlagName: string,
@@ -150,14 +156,22 @@ local FLAG_SERVICE_DATA_STORE = DataStoreService:GetDataStore(FLAG_SERVICE_DATA_
 -- Variables
 local isStarted = false
 local cachedFlags: { [string]: CachedFlag } = {}
-local flagChangedSignals: { [string]: any } = {}
+local flagChangedSignals: { [string]: Signal } = {}
 
 -- Private functions
 local function verboseWarn(...)
     warn("[FlagService]", ..., " | ", debug.traceback())
 end
 
-local function createCachedFlag(flagName: string, value: any?, isThisServerOnly: boolean?)
+local function fireFlagUpdatedSignal(flagName: string, value: any)
+    local flagChangedSignal: Signal? = flagChangedSignals[flagName]
+
+    if flagChangedSignal ~= nil then
+        flagChangedSignal:Fire(value)
+    end
+end
+
+local function createCachedFlag(flagName: string, value: any?, isThisServerOnly: boolean?, dontFireSignal: boolean?)
     if flagName == nil then
         verboseWarn("Flag name is nil, cannot cache flag")
         return
@@ -173,6 +187,10 @@ local function createCachedFlag(flagName: string, value: any?, isThisServerOnly:
         isThisServerOnly = false
     end
 
+    if dontFireSignal == nil then
+        dontFireSignal = false
+    end
+
     local cachedFlag: CachedFlag = {
         FlagName = flagName,
         IsThisServerOnly = isThisServerOnly,
@@ -180,6 +198,12 @@ local function createCachedFlag(flagName: string, value: any?, isThisServerOnly:
     }
 
     cachedFlags[flagName] = cachedFlag
+
+    if dontFireSignal == true then
+        return
+    end
+    
+    fireFlagUpdatedSignal(flagName, value)
 end
 
 local function getCachedFlag(flagName: string): CachedFlag
@@ -203,7 +227,7 @@ local function getFlag(flagName: string): any
         return nil
     end
 
-    createCachedFlag(flagName, result)
+    createCachedFlag(flagName, result, false, true)
 
     return result
 end
@@ -281,7 +305,7 @@ local function setCachedFlagValue(flagName: string, value: any?, isThisServerOnl
     if cachedFlag == nil then
         createCachedFlag(flagName, value, isThisServerOnly)
         
-        return false
+        return true
     end
 
     if cachedFlag.IsThisServerOnly == true and isThisServerOnly == false then
@@ -292,6 +316,8 @@ local function setCachedFlagValue(flagName: string, value: any?, isThisServerOnl
 
     cachedFlag.Value = value
     cachedFlag.IsThisServerOnly = isThisServerOnly
+
+    fireFlagUpdatedSignal(flagName, value)
 
     return true
 end
@@ -308,6 +334,16 @@ local function setFlag(flagName: string, value: any?, isThisServerOnly: boolean)
         sendFlagUpdateMessage(flagName)
     end
 
+end
+
+local function getFlagChangedSignal(flagName: string): Signal
+    if flagChangedSignals[flagName] == nil then
+        local newSignal = Signal.new()
+
+        flagChangedSignals[flagName] = newSignal
+    end
+
+    return flagChangedSignals[flagName]
 end
 
 local function readFlagChangedMessages()
@@ -337,6 +373,10 @@ end
 
 function FlagService:SetFlag(flagName: string, value: any?)
     return setFlag(flagName, value, false)
+end
+
+function FlagService:GetFlagChangedSignal(flagName: string)
+    return getFlagChangedSignal(flagName)
 end
 
 -- Start
