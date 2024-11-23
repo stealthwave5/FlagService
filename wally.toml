@@ -9,5 +9,4 @@ exclude = ["assets", "docs"]
 include = ["CHANGELOG.md", "FlagService", "default.project.json", "LICENSE"]
 
 [dependencies]
-Promise = "evaera/promise@^4"
 Signal = "lucasmzreal/fastsignal@10.2.1"
