@@ -1,7 +1,7 @@
 --!nonstrict
 
 --
---			FlagService			- Josh
+--			FlagService
 --
 --
 
@@ -202,7 +202,7 @@ local function createCachedFlag(flagName: string, value: any?, isThisServerOnly:
     if dontFireSignal == true then
         return
     end
-    
+
     fireFlagUpdatedSignal(flagName, value)
 end
 
