@@ -251,6 +251,8 @@ local function pullLatestFlagValueFromDataStore(flagName: string)
     end
 
     cachedFlag.Value = result
+    cachedFlag.IsThisServerOnly = false
+    
     fireFlagUpdatedSignal(flagName, result)
 end
 
