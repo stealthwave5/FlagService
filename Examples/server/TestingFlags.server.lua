@@ -5,10 +5,16 @@ local FlagService = require(ReplicatedStorage.Packages.FlagService) ---@module F
 
 local FLAG_NAME = "TestFlag"
 
+local currentFlagValue = FlagService:GetFlag(FLAG_NAME)
+
 FlagService:GetFlagChangedSignal(FLAG_NAME):Connect(function(newValue)
-    print("Flag changed to", newValue)
+    currentFlagValue = newValue
+    print("Current flag value is", currentFlagValue)
 end)
 
-local currentFlagValue = FlagService:GetFlag(FLAG_NAME)
 print("Current flag value is", currentFlagValue)
-FlagService:SetFlag(FLAG_NAME, not currentFlagValue)
+
+FlagService:SetFlagThisServer(FLAG_NAME, not currentFlagValue)
+task.wait(1)
+print("Resetting flag")
+FlagService:ResetFlagFromStorage(FLAG_NAME)

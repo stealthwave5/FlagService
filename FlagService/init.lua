@@ -135,7 +135,6 @@ type Signal = {
 
 type CachedFlag = {
     FlagName: string,
-    IsThisServerOnly: boolean,
     Value: any,
 }
 
@@ -232,25 +231,36 @@ local function getFlag(flagName: string): any
     return result
 end
 
-local function sendFlagUpdateMessage(flagName: string, byPassServerOnly: boolean?)
-    byPassServerOnly = byPassServerOnly ~= nil and byPassServerOnly or false
+local function pullLatestFlagValueFromDataStore(flagName: string)
+    local success, result = pcall(function()
+        return FLAG_SERVICE_DATA_STORE:GetAsync(flagName)
+    end)
 
+    if not success then
+        verboseWarn(`Failed to get flag value for flag {flagName}`, result)
+        
+        return
+    end
+
+    local cachedFlag = getCachedFlag(flagName)
+
+    if cachedFlag == nil then
+        verboseWarn(`Cached flag {flagName} is nil, cannot pull latest flag value from DataStore`)
+        
+        return
+    end
+
+    cachedFlag.Value = result
+    fireFlagUpdatedSignal(flagName, result)
+end
+
+local function sendFlagUpdateMessage(flagName: string)
     local cachedFlag = getCachedFlag(flagName)
 
     if cachedFlag == nil then
         verboseWarn(`Cached flag {flagName} is nil, cannot send flag update message`)
         
         return
-    end
-
-    if cachedFlag.IsThisServerOnly == true and byPassServerOnly == false then
-        verboseWarn(`Flag {flagName} is set to this server only, cannot send flag update message`)
-
-        return
-    end
-
-    if byPassServerOnly == true then
-        cachedFlag.IsThisServerOnly = false
     end
 
     local flagMessageData: FlagMessageData = {
@@ -261,20 +271,12 @@ local function sendFlagUpdateMessage(flagName: string, byPassServerOnly: boolean
     MessagingService:PublishAsync(FLAG_SERVICE_MESSAGING_TOPIC, flagMessageData)
 end
 
-local function updateFlagDataStore(flagName: string, byPassServerOnly: boolean?)
-    byPassServerOnly = byPassServerOnly ~= nil and byPassServerOnly or false
-
+local function updateFlagDataStore(flagName: string?)
     local cachedFlag = getCachedFlag(flagName)
 
     if cachedFlag == nil then
         verboseWarn(`Cached flag {flagName} is nil, cannot update flag data store`)
         
-        return
-    end
-
-    if cachedFlag.IsThisServerOnly == true and byPassServerOnly == false then
-        verboseWarn(`Flag {flagName} is set to this server only, cannot update flag data store`)
-
         return
     end
 
@@ -308,11 +310,12 @@ local function setCachedFlagValue(flagName: string, value: any?, isThisServerOnl
         return true
     end
 
-    if cachedFlag.IsThisServerOnly == true and isThisServerOnly == false then
-        verboseWarn(`Flag {flagName} is set to this server only, cannot set flag value`)
+    --! This essentially session locks the flag, currently feels unnecessary
+    -- if cachedFlag.IsThisServerOnly == true and isThisServerOnly == false then
+    --     verboseWarn(`Flag {flagName} is set to this server only, cannot set flag value`)
         
-        return false
-    end
+    --     return false
+    -- end
 
     cachedFlag.Value = value
     cachedFlag.IsThisServerOnly = isThisServerOnly
@@ -333,7 +336,6 @@ local function setFlag(flagName: string, value: any?, isThisServerOnly: boolean)
         updateFlagDataStore(flagName)
         sendFlagUpdateMessage(flagName)
     end
-
 end
 
 local function getFlagChangedSignal(flagName: string): Signal
@@ -377,6 +379,10 @@ end
 
 function FlagService:GetFlagChangedSignal(flagName: string)
     return getFlagChangedSignal(flagName)
+end
+
+function FlagService:ResetFlagFromStorage(flagName: string)
+    return pullLatestFlagValueFromDataStore(flagName)
 end
 
 -- Start
