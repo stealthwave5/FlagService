@@ -10,326 +10,432 @@ local FlagService = {}
 -- Services
 local DataStoreService = game:GetService("DataStoreService")
 local MessagingService = game:GetService("MessagingService")
+local RunService = game:GetService("RunService")
 
 -- Modules
-local Promise = require(script.Parent.Parent.Promise)
-local Signal = require(script.Parent.Parent.Signal)
+local Signal: Signal do
+
+	local FreeRunnerThread
+
+	--[[
+		Yield-safe coroutine reusing by stravant;
+		Sources:
+		https://devforum.roblox.com/t/lua-signal-class-comparison-optimal-goodsignal-class/1387063
+		https://gist.github.com/stravant/b75a322e0919d60dde8a0316d1f09d2f
+	--]]
+
+	local function AcquireRunnerThreadAndCallEventHandler(fn, ...)
+		local acquired_runner_thread = FreeRunnerThread
+		FreeRunnerThread = nil
+		fn(...)
+		-- The handler finished running, this runner thread is free again.
+		FreeRunnerThread = acquired_runner_thread
+	end
+
+	local function RunEventHandlerInFreeThread(...)
+		AcquireRunnerThreadAndCallEventHandler(...)
+		while true do
+			AcquireRunnerThreadAndCallEventHandler(coroutine.yield())
+		end
+	end
+
+	local Connection = {}
+	Connection.__index = Connection
+
+	local SignalClass = {}
+	SignalClass.__index = SignalClass
+
+	function Connection:Disconnect()
+
+		if self.is_connected == false then
+			return
+		end
+
+		local signal = self.signal
+		self.is_connected = false
+		signal.listener_count -= 1
+
+		if signal.head == self then
+			signal.head = self.next
+		else
+			local prev = signal.head
+			while prev ~= nil and prev.next ~= self do
+				prev = prev.next
+			end
+			if prev ~= nil then
+				prev.next = self.next
+			end
+		end
+
+	end
+
+	function SignalClass.new()
+
+		local self = {
+			head = nil,
+			listener_count = 0,
+		}
+		setmetatable(self, SignalClass)
+
+		return self
+
+	end
+
+	function SignalClass:Connect(listener: (...any) -> ())
+
+		if type(listener) ~= "function" then
+			error(`[{script.Name}]: \"listener\" must be a function; Received {typeof(listener)}`)
+		end
+
+		local connection = {
+			listener = listener,
+			signal = self,
+			next = self.head,
+			is_connected = true,
+		}
+		setmetatable(connection, Connection)
+
+		self.head = connection
+		self.listener_count += 1
+
+		return connection
+
+	end
+
+	function SignalClass:GetListenerCount(): number
+		return self.listener_count
+	end
+
+	function SignalClass:Fire(...)
+		local item = self.head
+		while item ~= nil do
+			if item.is_connected == true then
+				if not FreeRunnerThread then
+					FreeRunnerThread = coroutine.create(RunEventHandlerInFreeThread)
+				end
+				task.spawn(FreeRunnerThread, item.listener, ...)
+			end
+			item = item.next
+		end
+	end
+
+	Signal = table.freeze({
+		new = SignalClass.new,
+	})
+
+end
 
 -- Types
-type PromiseResolve = (props: any) -> ()
-type PromiseReject = (errorMessage: string?) -> ()
-type Promise<T> = {
-	andThen: (self: Promise<T>, func: (resolve: PromiseResolve, reject: PromiseReject, cancel: () -> ()) -> ()) -> Promise<T>,
-	andThenCall: (self: Promise<T>, func: (resolve: PromiseResolve, reject: PromiseReject, cancel: () -> ()) -> ()) -> Promise<T>,
-	andThenReturn: (self: Promise<T>, func: (resolve: PromiseResolve, reject: PromiseReject, cancel: () -> ()) -> ()) -> any,
-	await: () -> (),
-	awaitStatus: () -> (),
-	awaitValue: () -> Promise<T>,
-	cancel: () -> (),
-	catch: (self: Promise<T>, func: (e: string?) -> ()) -> (),
-	done: (self: Promise<T>, func: (resolve: PromiseResolve, reject: PromiseReject, cancel: () -> ()) -> ()) -> Promise<T>,
-	doneCall: (self: Promise<T>, func: (resolve: PromiseResolve, reject: PromiseReject, cancel: () -> ()) -> ()) -> Promise<T>,
-	doneReturn: (self: Promise<T>, func: (resolve: PromiseResolve, reject: PromiseReject, cancel: () -> ()) -> ()) -> (),
-	expect: () -> (),
-	finally: (self: Promise<T>, func: (resolve: PromiseResolve, reject: PromiseReject, cancel: () -> ()) -> ()) -> Promise<T>,
-	finallyCall: (self: Promise<T>, func: (resolve: PromiseResolve, reject: PromiseReject, cancel: () -> ()) -> ()) -> Promise<T>,
-	finallyReturn: (self: Promise<T>, func: (resolve: PromiseResolve, reject: PromiseReject, cancel: () -> ()) -> ()) -> (),
-	getStatus: () -> any,
-	now: () -> (),
-	tap: () -> Promise<T>,
-	timeout: (secs: any) -> Promise<T>,
+type Signal = {
+    new: () -> Signal,
+    Connect: (self: Signal, listener: (...any) -> ()) -> RBXScriptConnection,
+    GetListenerCount: () -> number,
+    Fire: (self: Signal, ...any) -> (),
 }
 
-type Connection = {
-	Disconnect: (self: Connection) -> (),
-	Destroy: (self: Connection) -> (),
-	Connected: boolean,
-}
-
-type Signal<T...> = {
-	Fire: (self: Signal<T...>, T...) -> (),
-	FireDeferred: (self: Signal<T...>, T...) -> (),
-	Connect: (self: Signal<T...>, fn: (T...) -> ()) -> Connection,
-	Once: (self: Signal<T...>, fn: (T...) -> ()) -> Connection,
-	DisconnectAll: (self: Signal<T...>) -> (),
-	GetConnections: (self: Signal<T...>) -> { Connection },
-	Destroy: (self: Signal<T...>) -> (),
-	Wait: (self: Signal<T...>) -> T...,
-}
-type messagingFlagData = {
-    Flag: Flag,
-    ServerId: string,
-}
-type flagMetaData = {
-    [string]: any,
-}
-export type Flag = {
-    Name: string,
+type CachedFlag = {
+    FlagName: string,
     Value: any,
+}
 
-    TimeUpdated: number?,
-
-    MetaData: flagMetaData?,
+type FlagMessageData = {
+    ServerId: string,
+    CachedFlag: CachedFlag,
 }
 
 -- Constants
 local FLAG_SERVICE_DATA_STORE_NAME = "FlagService_DataStore"
-local FLAG_SERVICE_DATA_STORE_KEY = "FlagService_DataStore_Key"
 local FLAG_SERVICE_MESSAGING_TOPIC = "FlagService_Messaging_Topic"
 
-local SERVER_ID = game.JobId
+local IS_STUDIO = RunService:IsStudio()
+local SERVER_ID = IS_STUDIO and "Studio" or game.JobId
+
+local FLAG_SERVICE_DATA_STORE = DataStoreService:GetDataStore(FLAG_SERVICE_DATA_STORE_NAME)
 
 -- Variables
-local isInitialized = false
-local hasLoadedFlags = false
-
-local flagsDataStore: DataStore = DataStoreService:GetDataStore(FLAG_SERVICE_DATA_STORE_NAME)
-local flags: { [string]: any } = {}
-local flagSignals: { [string]: Signal<any> } = {}
+local isStarted = false
+local cachedFlags: { [string]: CachedFlag } = {}
+local flagChangedSignals: { [string]: Signal } = {}
 
 -- Private functions
-function FlagService:_loadFlags()
-    local success, flagData = pcall(function()
-        return flagsDataStore:GetAsync(FLAG_SERVICE_DATA_STORE_KEY)
+local function verboseWarn(...)
+    warn("[FlagService]", ..., " | ", debug.traceback())
+end
+
+local function fireFlagUpdatedSignal(flagName: string, value: any)
+    local flagChangedSignal: Signal? = flagChangedSignals[flagName]
+
+    if flagChangedSignal ~= nil then
+        flagChangedSignal:Fire(value)
+    end
+end
+
+local function createCachedFlag(flagName: string, value: any?, isThisServerOnly: boolean?, dontFireSignal: boolean?)
+    if flagName == nil then
+        verboseWarn("Flag name is nil, cannot cache flag")
+        return
+    end
+
+    if cachedFlags[flagName] ~= nil then
+        verboseWarn(`Flag {flagName} is already cached!`)
+        
+        return
+    end
+
+    if isThisServerOnly == nil then
+        isThisServerOnly = false
+    end
+
+    if dontFireSignal == nil then
+        dontFireSignal = false
+    end
+
+    local cachedFlag: CachedFlag = {
+        FlagName = flagName,
+        IsThisServerOnly = isThisServerOnly,
+        Value = value,
+    }
+
+    cachedFlags[flagName] = cachedFlag
+
+    if dontFireSignal == true then
+        return
+    end
+
+    fireFlagUpdatedSignal(flagName, value)
+end
+
+local function getCachedFlag(flagName: string): CachedFlag
+    return cachedFlags[flagName]
+end
+
+local function getFlag(flagName: string): any?
+    local cachedFlag = getCachedFlag(flagName)
+
+    if cachedFlag ~= nil then
+        return cachedFlag.Value
+    end
+
+    local success, result = pcall(function()
+        return FLAG_SERVICE_DATA_STORE:GetAsync(flagName)
     end)
 
     if not success then
-        warn("Failed to load flags from DataStore", flagData)
+        verboseWarn(`Failed to get flag value for flag {flagName}`, result)
+        
+        return nil
+    end
+
+    createCachedFlag(flagName, result, false, true)
+
+    return result
+end
+
+local function pullLatestFlagValueFromDataStore(flagName: string)
+    local success, result = pcall(function()
+        return FLAG_SERVICE_DATA_STORE:GetAsync(flagName)
+    end)
+
+    if not success then
+        verboseWarn(`Failed to get flag value for flag {flagName}`, result)
+        
         return
     end
 
-    flags = flagData or {}
+    local cachedFlag = getCachedFlag(flagName)
 
-    hasLoadedFlags = true
+    if cachedFlag == nil then
+        verboseWarn(`Cached flag {flagName} is nil, cannot pull latest flag value from DataStore`)
+        
+        return
+    end
+
+    cachedFlag.Value = result
+    cachedFlag.IsThisServerOnly = false
+    
+    fireFlagUpdatedSignal(flagName, result)
 end
 
-function FlagService:_readFlagChangedMessages()
-    MessagingService:SubscribeAsync(FLAG_SERVICE_MESSAGING_TOPIC, function(message: Message)
-        local messagingFlagData: messagingFlagData = message.Data
+local function sendFlagUpdateMessage(flagName: string)
+    local cachedFlag = getCachedFlag(flagName)
 
-        if messagingFlagData.ServerId == SERVER_ID then
+    if cachedFlag == nil then
+        verboseWarn(`Cached flag {flagName} is nil, cannot send flag update message`)
+        
+        return
+    end
+
+    local flagMessageData: FlagMessageData = {
+        ServerId = SERVER_ID,
+        CachedFlag = cachedFlag,
+    }
+
+    MessagingService:PublishAsync(FLAG_SERVICE_MESSAGING_TOPIC, flagMessageData)
+end
+
+local function updateFlagDataStore(flagName: string?)
+    local cachedFlag = getCachedFlag(flagName)
+
+    if cachedFlag == nil then
+        verboseWarn(`Cached flag {flagName} is nil, cannot update flag data store`)
+        
+        return
+    end
+
+    local success, result = pcall(FLAG_SERVICE_DATA_STORE.UpdateAsync, FLAG_SERVICE_DATA_STORE, flagName, function(oldValue: any?)
+        return cachedFlag.Value
+    end)
+
+    if not success then
+        verboseWarn(`Failed to update flag {flagName} in DataStore`, result)
+        
+        return
+    end
+end
+
+local function setCachedFlagValue(flagName: string, value: any?, isThisServerOnly: boolean): boolean
+    if flagName == nil then
+        verboseWarn("Flag name is nil, cannot set flag value")
+        return false
+    end
+
+    if isThisServerOnly == nil then
+        verboseWarn("isThisServerOnly is nil, cannot set flag value")
+        return false
+    end
+
+    local cachedFlag = getCachedFlag(flagName)
+
+    if cachedFlag == nil then
+        createCachedFlag(flagName, value, isThisServerOnly)
+        
+        return true
+    end
+
+    --! This essentially session locks the flag, currently feels unnecessary
+    -- if cachedFlag.IsThisServerOnly == true and isThisServerOnly == false then
+    --     verboseWarn(`Flag {flagName} is set to this server only, cannot set flag value`)
+        
+    --     return false
+    -- end
+
+    cachedFlag.Value = value
+    cachedFlag.IsThisServerOnly = isThisServerOnly
+
+    fireFlagUpdatedSignal(flagName, value)
+
+    return true
+end
+
+local function publishFlag(flagName: string)
+    local cachedFlag = getCachedFlag(flagName)
+
+    if cachedFlag == nil then
+        verboseWarn(`Cached flag {flagName} is nil, cannot publish flag`)
+        
+        return
+    end
+
+    cachedFlag.IsThisServerOnly = false
+
+    updateFlagDataStore(flagName)
+    sendFlagUpdateMessage(flagName)
+end
+
+local function setFlag(flagName: string, value: any?, isThisServerOnly: boolean)
+    local hasSetFlag = setCachedFlagValue(flagName, value, isThisServerOnly)
+
+    if hasSetFlag == false then
+        return
+    end
+
+    if isThisServerOnly == false then
+        publishFlag(flagName)
+    end
+end
+
+local function getFlagChangedSignal(flagName: string): Signal
+    if flagChangedSignals[flagName] == nil then
+        local newSignal = Signal.new()
+
+        flagChangedSignals[flagName] = newSignal
+    end
+
+    return flagChangedSignals[flagName]
+end
+
+local function readFlagChangedMessages()
+    MessagingService:SubscribeAsync(FLAG_SERVICE_MESSAGING_TOPIC, function(message: Message)
+        local messageFlagData: FlagMessageData = message.Data
+
+        local serverId = messageFlagData.ServerId
+
+        if serverId == SERVER_ID then
             return
         end
 
-        local flag = messagingFlagData.Flag
+        local cachedFlag = messageFlagData.CachedFlag
 
-        FlagService:_updateFlagValue(flag.Name, flag.Value)
-        if flag.MetaData ~= nil then
-            FlagService:_updateFlagMetaData(flag.Name, flag.MetaData)
-        end
-
-        FlagService:_fireInternalFlagChangedSignal(flag.Name)
+        setCachedFlagValue(cachedFlag.FlagName, cachedFlag.Value, false)
     end)
-end
-
-function FlagService:_awaitFlagsLoaded()
-    repeat
-        task.wait()
-    until hasLoadedFlags == true
-end
-
-function FlagService:_createFlag(flagData: Flag)
-    if flagData.Name == nil then
-        warn("Flag data is missing a name")
-        return
-    end
-    if flagData.Value == nil then
-        warn("Flag data is missing a value")
-        return
-    end
-
-    if flagData.TimeUpdated == nil then
-        flagData.TimeUpdated = os.time()
-    end
-
-    flags[flagData.Name] = flagData
-end
-
-function FlagService:_updateFlagValue(flagName: string, flagValue: any)
-    if flags[flagName] == nil then
-        warn("Flag does not exist")
-        return
-    end
-
-    flags[flagName].Value = flagValue
-    flags[flagName].TimeUpdated = os.time()
-end
-
-function FlagService:_updateFlagMetaData(flagName: string, flagMetaData: flagMetaData)
-    if flags[flagName] == nil then
-        warn("Flag does not exist")
-        return
-    end
-
-    flags[flagName].MetaData = flagMetaData
-end
-
-function FlagService:_sendFlagChangedMessageToOtherServers(Flag: Flag)
-    local messagingFlagData: messagingFlagData = {
-        Flag = Flag,
-        ServerId = SERVER_ID,
-    }
-
-    MessagingService:PublishAsync(FLAG_SERVICE_MESSAGING_TOPIC, messagingFlagData)
-end
-
-function FlagService:_fireInternalFlagChangedSignal(flagName: string)
-    if not flagSignals[flagName] then
-        return
-    end
-
-    flagSignals[flagName]:Fire(flags[flagName].Value)
-end
-
-function FlagService:_initialize()
-    isInitialized = true
-    FlagService:_loadFlags()
-    FlagService:_readFlagChangedMessages()
 end
 
 -- Public functions
 
---//
---// Set a flag by name
---//
+---Gets the current value of a flag
+---@param flagName string
+---@return any?
+function FlagService:GetFlag(flagName: string)
+    return getFlag(flagName)
+end
 
-function FlagService:SetFlag(flagName: string, newValue: any, metaData: flagMetaData?)
-    if flags[flagName] == nil then
-        FlagService:_createFlag({
-            Name = flagName,
-            Value = newValue,
-            MetaData = metaData,
-        })
+---Sets the value of a flag for this server only.
+---Will not update in the data store or be sent to other servers.
+---@param flagName string
+---@param value any
+function FlagService:SetFlagThisServer(flagName: string, value: any?)
+    return setFlag(flagName, value, true)    
+end
+
+---Sets the value of a flag.
+---This will update the flag in the DataStore and send the updated flag to other servers.
+---@param flagName string
+---@param value any
+function FlagService:SetFlag(flagName: string, value: any?)
+    return setFlag(flagName, value, false)
+end
+
+---Gets the Signal for when a flag changes.
+---@param flagName string
+function FlagService:GetFlagChangedSignal(flagName: string)
+    return getFlagChangedSignal(flagName)
+end
+
+---Forces FlagService to update the value of a flag from the DataStore.
+---This will fire the flag changed signal with the new value.
+---@param flagName string
+function FlagService:UpdateFlag(flagName: string)
+    return pullLatestFlagValueFromDataStore(flagName)
+end
+
+---Publishes the current cached value of a flag to other servers.
+---Mostly used for when you have set a flag to this server only and want to replicate it.
+---@param flagName string
+function FlagService:PublishFlag(flagName: string)
+    return publishFlag(flagName)
+end
+
+-- Start
+function FlagService.start()
+    if isStarted == true then
+        return FlagService
     end
 
-    FlagService:_updateFlagValue(flagName, newValue)
+    isStarted = true
 
-    if metaData ~= nil then
-        FlagService:_updateFlagMetaData(flagName, metaData)
-    end
+    readFlagChangedMessages()
 
-    local thisFlag: Flag = flags[flagName]
-
-    local success, result = pcall(function()
-        return flagsDataStore:UpdateAsync(FLAG_SERVICE_DATA_STORE_KEY, function(oldData: any?)
-            local newFlags = oldData or {}
-
-            newFlags[flagName] = thisFlag
-
-            return newFlags
-        end)
-    end)
-
-    if not success then
-        warn("Failed to update flag in DataStore", result)
-        return false, result
-    end
-
-    FlagService:_fireInternalFlagChangedSignal(flagName)
-    FlagService:_sendFlagChangedMessageToOtherServers(thisFlag)
-
-    return true, thisFlag
+    return FlagService
 end
 
-function FlagService:SetFlagAsync(flagName: string, newValue: any, metaData: flagMetaData?): Promise<boolean | string>
-    return Promise.new(function(resolve: PromiseResolve, reject: PromiseReject)
-        if hasLoadedFlags == false then
-            FlagService:_awaitFlagsLoaded()
-        end
-
-        local success, result = FlagService:SetFlag(flagName, newValue, metaData)
-
-        if not success then
-            reject(result)
-            return
-        end
-
-        resolve(result)
-    end)
-end
-
---//
---// Get a flag by name
---//
-
-function FlagService:GetFlag(flagName: string): Flag?
-    return flags[flagName]
-end
-
-function FlagService:GetFlagAsync(flagName: string): Promise<Flag>
-    return Promise.new(function(resolve: PromiseResolve, reject: PromiseReject)
-        if hasLoadedFlags == false then
-            FlagService:_awaitFlagsLoaded()
-        end
-
-        local flagData = FlagService:GetFlag(flagName)
-
-        if flagData == nil then
-            reject("Flag does not exist")
-            return
-        end
-
-        resolve(flagData)
-    end)
-end
-
---//
---// Update a flag by name
---//
-function FlagService:UpdateFlag(flagName: string, updateFunction: (oldValue: any) -> any, metaData: any)
-    if flags[flagName] == nil then
-        warn("Flag does not exist")
-        return
-    end
-
-    local flag = flags[flagName]
-
-    local newValue = updateFunction(flag.Value)
-
-    local success, result = FlagService:SetFlagAsync(flagName, newValue, metaData):await()
-
-    if not success then
-        return success, result
-    end
-
-    return success, result
-end
-
-function FlagService:UpdateFlagAsync(flagName: string, updateFunction: (oldValue: any) -> any, metaData: any): Promise<Flag>
-    return Promise.new(function(resolve: PromiseResolve, reject: PromiseReject)
-        if hasLoadedFlags == false then
-            FlagService:_awaitFlagsLoaded()
-        end
-
-        local success, result = FlagService:UpdateFlag(flagName, updateFunction, metaData)
-
-        if not success then
-            reject(result)
-            return
-        end
-
-        resolve(result)
-    end)
-end
-
---//
---// Get a flag changed signal
---//
-
-function FlagService:GetFlagChangedSignal(flagName: string): Signal<any>
-    if not flagSignals[flagName] then
-        flagSignals[flagName] = Signal.new()
-    end
-
-    return flagSignals[flagName]
-end
-
---//
---// Setup
---//
-
-if isInitialized == false then
-    FlagService:_initialize()
-end
-
-return FlagService
+return FlagService.start()
