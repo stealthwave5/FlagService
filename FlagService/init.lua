@@ -390,7 +390,7 @@ function FlagService:GetFlag(flagName: string)
 end
 
 ---Sets the value of a flag for this server only.
----Will not update in the data store or be sent to other servers
+---Will not update in the data store or be sent to other servers.
 ---@param flagName string
 ---@param value any
 function FlagService:SetFlagThisServer(flagName: string, value: any?)
@@ -419,7 +419,7 @@ function FlagService:UpdateFlag(flagName: string)
 end
 
 ---Publishes the current cached value of a flag to other servers.
----Mostly used for when you have set a flag to this server only and want to publish it.
+---Mostly used for when you have set a flag to this server only and want to replicate it.
 ---@param flagName string
 function FlagService:PublishFlag(flagName: string)
     return publishFlag(flagName)
