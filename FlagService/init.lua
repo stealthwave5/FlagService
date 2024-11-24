@@ -209,7 +209,7 @@ local function getCachedFlag(flagName: string): CachedFlag
     return cachedFlags[flagName]
 end
 
-local function getFlag(flagName: string): any
+local function getFlag(flagName: string): any?
     local cachedFlag = getCachedFlag(flagName)
 
     if cachedFlag ~= nil then
@@ -382,17 +382,15 @@ end
 
 -- Public functions
 
----Gets the current cached value of a flag.
----If the flag is not cached, it will be fetched from the DataStore.
+---Gets the current value of a flag
 ---@param flagName string
----@return any
+---@return any?
 function FlagService:GetFlag(flagName: string)
     return getFlag(flagName)
 end
 
 ---Sets the value of a flag for this server only.
----This means that the flag will not be updated in the DataStore or sent to other servers.
----It will be overwritten if the flag is updated from the DataStore or another server.
+---Will not update in the data store or be sent to other servers
 ---@param flagName string
 ---@param value any
 function FlagService:SetFlagThisServer(flagName: string, value: any?)
@@ -421,6 +419,7 @@ function FlagService:UpdateFlag(flagName: string)
 end
 
 ---Publishes the current cached value of a flag to other servers.
+---Mostly used for when you have set a flag to this server only and want to publish it.
 ---@param flagName string
 function FlagService:PublishFlag(flagName: string)
     return publishFlag(flagName)
