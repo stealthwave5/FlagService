@@ -14,6 +14,7 @@ local izZoneEnabled = FlagService:GetFlag(FLAG_NAME)
 
 if izZoneEnabled == nil then
     FlagService:SetFlag(FLAG_NAME, DEFAULT_VALUE)
+    izZoneEnabled = DEFAULT_VALUE
 end
 
 local function updateZoneEnabled(isEnabled: boolean)
