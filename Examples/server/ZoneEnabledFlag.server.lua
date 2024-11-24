@@ -8,7 +8,7 @@ local FlagService = require(ReplicatedStorage.Packages.FlagService) ---@module F
 local FLAG_NAME = "ZoneEnabled"
 local DEFAULT_VALUE = false
 
-local ZONE_TWO_MODEL = workspace:WaitForChild("ZoneModel")
+local ZONE_MODEL = workspace:WaitForChild("ZoneModel")
 
 local izZoneEnabled = FlagService:GetFlag(FLAG_NAME)
 
@@ -19,7 +19,7 @@ end
 local function updateZoneEnabled(isEnabled: boolean)
     izZoneEnabled = isEnabled
 
-    ZONE_TWO_MODEL.Parent = isEnabled and workspace or ReplicatedStorage
+    ZONE_MODEL.Parent = isEnabled and workspace or ReplicatedStorage
 end
 
 FlagService:GetFlagChangedSignal(FLAG_NAME):Connect(updateZoneEnabled)
