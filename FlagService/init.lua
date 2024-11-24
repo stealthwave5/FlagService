@@ -327,6 +327,21 @@ local function setCachedFlagValue(flagName: string, value: any?, isThisServerOnl
     return true
 end
 
+local function publishFlag(flagName: string)
+    local cachedFlag = getCachedFlag(flagName)
+
+    if cachedFlag == nil then
+        verboseWarn(`Cached flag {flagName} is nil, cannot publish flag`)
+        
+        return
+    end
+
+    cachedFlag.IsThisServerOnly = false
+
+    updateFlagDataStore(flagName)
+    sendFlagUpdateMessage(flagName)
+end
+
 local function setFlag(flagName: string, value: any?, isThisServerOnly: boolean)
     local hasSetFlag = setCachedFlagValue(flagName, value, isThisServerOnly)
 
@@ -335,8 +350,7 @@ local function setFlag(flagName: string, value: any?, isThisServerOnly: boolean)
     end
 
     if isThisServerOnly == false then
-        updateFlagDataStore(flagName)
-        sendFlagUpdateMessage(flagName)
+        publishFlag(flagName)
     end
 end
 
@@ -367,24 +381,49 @@ local function readFlagChangedMessages()
 end
 
 -- Public functions
+
+---Gets the current cached value of a flag.
+---If the flag is not cached, it will be fetched from the DataStore.
+---@param flagName string
+---@return any
 function FlagService:GetFlag(flagName: string)
     return getFlag(flagName)
 end
 
+---Sets the value of a flag for this server only.
+---This means that the flag will not be updated in the DataStore or sent to other servers.
+---It will be overwritten if the flag is updated from the DataStore or another server.
+---@param flagName string
+---@param value any
 function FlagService:SetFlagThisServer(flagName: string, value: any?)
     return setFlag(flagName, value, true)    
 end
 
+---Sets the value of a flag.
+---This will update the flag in the DataStore and send the updated flag to other servers.
+---@param flagName string
+---@param value any
 function FlagService:SetFlag(flagName: string, value: any?)
     return setFlag(flagName, value, false)
 end
 
+---Gets the Signal for when a flag changes.
+---@param flagName string
 function FlagService:GetFlagChangedSignal(flagName: string)
     return getFlagChangedSignal(flagName)
 end
 
+---Forces FlagService to update the value of a flag from the DataStore.
+---This will fire the flag changed signal with the new value.
+---@param flagName string
 function FlagService:UpdateFlag(flagName: string)
     return pullLatestFlagValueFromDataStore(flagName)
+end
+
+---Publishes the current value of a flag to other servers.
+---@param flagName string
+function FlagService:PublishFlag(flagName: string)
+    return publishFlag(flagName)
 end
 
 -- Start
