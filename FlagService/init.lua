@@ -420,7 +420,7 @@ function FlagService:UpdateFlag(flagName: string)
     return pullLatestFlagValueFromDataStore(flagName)
 end
 
----Publishes the current value of a flag to other servers.
+---Publishes the current cached value of a flag to other servers.
 ---@param flagName string
 function FlagService:PublishFlag(flagName: string)
     return publishFlag(flagName)
